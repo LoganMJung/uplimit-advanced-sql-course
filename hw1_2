@@ -1,0 +1,89 @@
+WITH customers
+AS (
+	SELECT cd.customer_id
+		,cd.first_name
+		,cd.last_name
+		,cd.email
+		,ca.customer_city
+		,ca.customer_state
+		,cit.geo_location AS customer_geo_location
+	FROM vk_data.customers.customer_data cd
+	LEFT JOIN vk_data.customers.customer_address ca ON cd.customer_id = ca.customer_id
+	INNER JOIN vk_data.resources.us_cities cit ON trim(lower(ca.customer_city)) = trim(lower(cit.city_name))
+		AND trim(lower(ca.customer_state)) = trim(lower(cit.state_abbr))
+	),
+
+suppliers
+AS (
+	SELECT si.supplier_id
+		,si.supplier_name
+		,si.supplier_city
+		,si.supplier_state
+		,cit.geo_location AS supplier_geo_location
+	FROM vk_data.suppliers.supplier_info si
+	LEFT JOIN vk_data.resources.us_cities cit ON trim(lower(si.supplier_city)) = trim(lower(cit.city_name))
+		AND trim(lower(si.supplier_state)) = trim(lower(cit.state_abbr))
+	),
+    
+eligible
+AS (
+	SELECT customer_id
+		,first_name
+		,last_name
+		,email
+	FROM (
+		SELECT *
+			,st_distance(c.customer_geo_location, sup.supplier_geo_location) / 1609.34 AS shipping_distance_km
+			,row_number() OVER (PARTITION BY customer_id ORDER BY st_distance(c.customer_geo_location, sup.supplier_geo_location) / 1609.34 ASC) AS rank
+		FROM customers c
+		CROSS JOIN suppliers sup QUALIFY rank = 1
+		)
+	ORDER BY last_name
+		,first_name
+	),
+    
+active_tags
+AS (
+	SELECT s.customer_id
+		,rt.tag_property
+		,row_number() OVER (PARTITION BY s.customer_id ORDER BY tag_property ASC) AS tag_prop_rn
+	FROM vk_data.customers.customer_survey AS s
+	INNER JOIN vk_data.resources.recipe_tags AS rt ON s.tag_id = rt.tag_id
+	WHERE s.is_active = true
+	--QUALIFY tag_prop_rn <= 3
+	ORDER BY customer_id
+	),
+    
+recipe_tags_flat
+AS (
+	SELECT recipe_id
+		,recipe_name
+		,trim(replace(flat_tag.value, '"', '')) AS recipe_tag
+		,row_number() OVER (PARTITION BY recipe_tag ORDER BY recipe_id,recipe_name) AS recipe_property_tag_id
+	FROM vk_data.chefs.recipe
+		,TABLE (flatten(tag_list)) AS flat_tag
+	),
+
+    
+customer_flatten_tags
+AS (
+	SELECT first_name
+		,email
+		,at.customer_id
+		,tag_property
+		,tag_prop_rn
+	FROM eligible eli
+	INNER JOIN active_tags at ON at.customer_id = eli.customer_id
+	)
+
+
+SELECT cft.*
+	,recipe_name AS suggested_recipe
+FROM (
+	SELECT *
+	FROM customer_flatten_tags
+	pivot(max(tag_property) FOR tag_prop_rn IN (1,2,3)) AS p(first_name, email, customer_id, food_pref_1, food_pref_2, food_pref_3)
+	) cft
+INNER JOIN recipe_tags_flat AS rec_tags ON lower(trim(cft.food_pref_1)) = lower(trim(rec_tags.recipe_tag))
+WHERE recipe_property_tag_id = 1
+ORDER BY email
