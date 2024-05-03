@@ -1,0 +1,70 @@
+-- Exercise
+
+--Virtual Kitchen has an emergency! We shipped several meal kits without including fresh parsley, and our customers are starting to complain. We have identified the impacted cities, and we know that 25 of our customers did not get their parsley. That number might seem small, but Virtual Kitchen is committed to providing every customer with a great experience.
+
+--Our management has decided to provide a different recipe for free (if the customer has other preferences available), or else use grocery stores in the greater Chicago area to send an overnight shipment of fresh parsley to our customers. We have one store in Chicago, IL and one store in Gary, IN both ready to help out with this request.
+
+--Last night, our on-call developer created a query to identify the impacted customers and their attributes in order to compose an offer to these customers to make things right. But the developer was paged at 2 a.m. when the problem occurred, and she created a fast query so that she could go back to sleep.
+
+--You review her code today and decide to reformat her query so that she can catch up on sleep.
+
+--Here is the query she emailed you. Refactor it to apply a consistent format, and add comments that explain your choices. We are going to review different options in the lecture, so if you are willing to share your refactored query with the class, then let us know!
+
+USE VK_DATA; 
+
+WITH customer_pref_count as (
+SELECT customer_id
+		,count(*) AS food_pref_count
+	FROM vk_data.customers.customer_survey
+	WHERE is_active = true
+	GROUP BY 1),
+
+chicago_il as (
+SELECT geo_location
+	FROM vk_data.resources.us_cities
+	WHERE city_name = 'CHICAGO'
+		AND state_abbr = 'IL'
+),
+
+gary_in as (
+	SELECT geo_location
+	FROM vk_data.resources.us_cities
+	WHERE city_name = 'GARY'
+		AND state_abbr = 'IN'),
+
+customer_base
+AS (
+	SELECT *
+	FROM vk_data.customers.customer_address AS ca_base
+	LEFT JOIN vk_data.resources.us_cities us ON TRIM(ca_base.customer_state) ILIKE us.state_abbr
+		AND TRIM(ca_base.customer_city) ILIKE us.city_name
+	WHERE (
+			us.city_name ILIKE ANY ('%concord%','%georgetown%','%ashland%')
+			AND ca_base.customer_state = 'KY'
+			)
+		OR (
+			us.city_name ILIKE ANY ('%oakland%','%pleasant hill%')
+			AND ca_base.customer_state = 'CA'
+			)
+		OR (
+			us.city_name ILIKE ANY ('%arlington%','%brownsville%')
+			AND ca_base.customer_state = 'TX'
+			)
+	)
+
+    
+SELECT RTRIM(LTRIM(CONCAT(COALESCE(First_Name, ''),' ', COALESCE(Last_Name, '')))) AS customer_name
+	,ca.customer_city
+	,ca.customer_state
+	,s.food_pref_count
+	,(st_distance(ca.geo_location, chic.geo_location) / 1609)::INT AS chicago_distance_miles
+	,(st_distance(ca.geo_location, gary.geo_location) / 1609)::INT AS gary_distance_miles
+FROM Customer_base AS ca
+JOIN vk_data.customers.customer_data c ON ca.customer_id = c.customer_id
+JOIN customer_pref_count s ON c.customer_id = s.customer_id
+CROSS JOIN chicago_il chic
+CROSS JOIN gary_in gary
+
+-- Logic to Answer: I decided to drop a lot of unnecessary TRIM or case functions like UPPER or LOWER so it cleaned up the query a bit more. I made sure these did not impact the final result before fully removing them.
+
+--I also decided to use ILIKE ANY in my query to list out the cities with fuzzy matching logic.
