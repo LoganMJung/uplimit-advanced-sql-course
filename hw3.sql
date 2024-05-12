@@ -9,9 +9,7 @@ WITH top_recipe_by_day
 AS (
 	SELECT EVENT_DATE, RECIPE_ID
 	FROM (
-		SELECT event_date, RECIPE_ID, RVD, ROW_NUMBER() OVER (
-				PARTITION BY EVENT_DATE ORDER BY EVENT_DATE
-				) rn
+		SELECT event_date, RECIPE_ID, RVD, ROW_NUMBER() OVER (PARTITION BY EVENT_DATE ORDER BY EVENT_DATE) rn
 		FROM (
 			SELECT DISTINCT DATE_TRUNC('day', EVENT_TIMESTAMP) event_date, trim(PARSE_JSON(event_details) : "recipe_id", '*') AS recipe_id, COUNT(*) OVER (PARTITION BY DATE_TRUNC('day', EVENT_TIMESTAMP), RECIPE_ID) AS RVD
 			FROM vk_data.events.website_activity
@@ -25,7 +23,16 @@ AS (
 
 base_sessions
 AS (
-	SELECT SESSION_ID, DATE_TRUNC('day', EVENT_TIMESTAMP) event_day, datediff('second', min(event_timestamp) OVER (PARTITION BY session_id), max(event_timestamp) OVER (PARTITION BY session_id)) AS session_dur, CASE WHEN trim(PARSE_JSON(event_details) : "event", '*') = 'search' AND EVENT_TIMESTAMP < (min(CASE WHEN trim(PARSE_JSON(event_details) : "event", '*') = 'view_recipe' THEN event_timestamp ELSE NULL END) OVER (PARTITION BY session_id)) THEN 1 ELSE NULL END AS FRV, MAX(CASE WHEN trim(PARSE_JSON(event_details) : "event", '*') = 'view_recipe' THEN 1 ELSE 0 END) OVER (PARTITION BY SESSION_ID) AS rv_session, Count(DISTINCT Session_ID) OVER (PARTITION BY EVENT_DAY) AS spd
+	SELECT SESSION_ID
+		,DATE_TRUNC('day', EVENT_TIMESTAMP) event_day
+		,datediff('second', min(event_timestamp) OVER (PARTITION BY session_id)
+		,max(event_timestamp) OVER (PARTITION BY session_id)) AS session_dur
+		,CASE WHEN trim(PARSE_JSON(event_details) : "event", '*') = 'search' 
+			AND EVENT_TIMESTAMP < (min(CASE WHEN trim(PARSE_JSON(event_details) : "event", '*') = 'view_recipe' 
+			THEN event_timestamp ELSE NULL END) OVER (PARTITION BY session_id)) 
+				THEN 1 ELSE NULL END AS FRV, MAX(CASE WHEN trim(PARSE_JSON(event_details) : "event", '*') = 'view_recipe' 
+					THEN 1 ELSE 0 END) OVER (PARTITION BY SESSION_ID) AS rv_session
+		,Count(DISTINCT Session_ID) OVER (PARTITION BY EVENT_DAY) AS spd
 	FROM vk_data.events.website_activity
 	ORDER BY EVENT_TIMESTAMP
 	), 
